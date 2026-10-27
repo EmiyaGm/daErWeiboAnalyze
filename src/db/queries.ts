@@ -85,6 +85,32 @@ export function insertPost(post: InsertPostInput): boolean {
   return result.changes > 0;
 }
 
+export function updatePostEngagement(
+  weiboId: string,
+  data: { reposts: number; comments: number; attitudes: number },
+): void {
+  getDb()
+    .prepare(
+      `UPDATE posts
+       SET reposts = @reposts, comments = @comments, attitudes = @attitudes, fetched_at = @fetched_at
+       WHERE weibo_id = @weibo_id`,
+    )
+    .run({
+      weibo_id: weiboId,
+      reposts: data.reposts,
+      comments: data.comments,
+      attitudes: data.attitudes,
+      fetched_at: new Date().toISOString(),
+    });
+}
+
+export function findWeiboIdBySubmitId(submitId: string): string | null {
+  const row = getDb()
+    .prepare("SELECT weibo_id FROM posts WHERE submit_id = ? LIMIT 1")
+    .get(submitId) as { weibo_id: string } | undefined;
+  return row?.weibo_id ?? null;
+}
+
 export function insertImage(image: InsertImageInput): void {
   getDb()
     .prepare(

@@ -190,6 +190,15 @@ select {
   box-shadow: var(--shadow);
 }
 
+.card .thumb-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+}
+
 .card .thumb {
   aspect-ratio: 1;
   background: #ddd4c4;
@@ -200,6 +209,7 @@ select {
 
 .card .meta {
   padding: 12px;
+  cursor: pointer;
 }
 
 .card .meta .region {
@@ -270,10 +280,184 @@ select {
   margin-top: 14px;
 }
 
+.modal-image-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
 .modal-images img {
   width: 100%;
   border-radius: 10px;
   display: block;
+  transition: transform 0.15s ease;
+}
+
+.modal-image-btn:hover img {
+  transform: scale(1.02);
+}
+
+.lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(10, 8, 6, 0.88);
+  display: grid;
+  place-items: center;
+  padding: 48px 64px;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+.lightbox-stage {
+  max-width: min(96vw, 1200px);
+  max-height: 88vh;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  touch-action: none;
+  cursor: zoom-in;
+}
+
+.lightbox-stage.is-zoomed {
+  cursor: grab;
+  max-width: 100vw;
+  max-height: 100vh;
+  width: 100vw;
+  height: 100vh;
+}
+
+.lightbox-stage.is-zoomed:active {
+  cursor: grabbing;
+}
+
+.lightbox-img {
+  max-width: min(96vw, 1200px);
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  user-select: none;
+  transform-origin: center center;
+  transition: transform 0.05s linear;
+  pointer-events: none;
+}
+
+.lightbox-stage.is-zoomed .lightbox-img {
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  max-height: 88vh;
+}
+
+.lightbox-zoom-bar {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  z-index: 2;
+}
+
+.lightbox-zoom-btn,
+.lightbox-zoom-label {
+  border: none;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  min-width: 36px;
+  height: 32px;
+  border-radius: 999px;
+  font-size: 1.1rem;
+}
+
+.lightbox-zoom-label {
+  min-width: 56px;
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.lightbox-zoom-btn:hover,
+.lightbox-zoom-label:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 1.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lightbox-prev {
+  left: 16px;
+}
+
+.lightbox-next {
+  right: 16px;
+}
+
+.lightbox-counter {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.lightbox-hint {
+  font-size: 0.75rem;
+  opacity: 0.65;
+  letter-spacing: 0;
+}
+
+@media (max-width: 640px) {
+  .lightbox-backdrop {
+    padding: 56px 12px 40px;
+  }
+
+  .lightbox-nav {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 .pre {

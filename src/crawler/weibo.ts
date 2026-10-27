@@ -1,11 +1,13 @@
 import { config } from "../config.js";
 import {
   createCrawlRun,
+  findWeiboIdBySubmitId,
   insertImage,
   insertPost,
   postExists,
   submitIdExists,
   updateCrawlRun,
+  updatePostEngagement,
 } from "../db/queries.js";
 import { getDb } from "../db/schema.js";
 import { downloadImage } from "./images.js";
@@ -330,8 +332,17 @@ export async function runCrawl(options: CrawlOptions = {}): Promise<CrawlProgres
 
         progress.matched += 1;
         const matchId = String(matchedStatus.idstr || matchedStatus.id || weiboId);
+        const engagement = {
+          reposts: matchedStatus.reposts_count ?? item.reposts_count ?? 0,
+          comments: matchedStatus.comments_count ?? item.comments_count ?? 0,
+          attitudes: matchedStatus.attitudes_count ?? item.attitudes_count ?? 0,
+        };
 
         if (postExists(matchId) || submitIdExists(parsed.submitId)) {
+          const existingId = postExists(matchId)
+            ? matchId
+            : findWeiboIdBySubmitId(parsed.submitId);
+          if (existingId) updatePostEngagement(existingId, engagement);
           progress.skippedDup += 1;
           continue;
         }
@@ -348,6 +359,16 @@ export async function runCrawl(options: CrawlOptions = {}): Promise<CrawlProgres
 
         const finalParsed = parseSubmitPost(statusText(detail)) || parsed;
         if (submitIdExists(finalParsed.submitId) || postExists(matchId)) {
+          const existingId = postExists(matchId)
+            ? matchId
+            : findWeiboIdBySubmitId(finalParsed.submitId);
+          if (existingId) {
+            updatePostEngagement(existingId, {
+              reposts: detail.reposts_count ?? engagement.reposts,
+              comments: detail.comments_count ?? engagement.comments,
+              attitudes: detail.attitudes_count ?? engagement.attitudes,
+            });
+          }
           progress.skippedDup += 1;
           continue;
         }
@@ -361,9 +382,9 @@ export async function runCrawl(options: CrawlOptions = {}): Promise<CrawlProgres
           gender: finalParsed.gender,
           text: statusText(detail),
           created_at: parseWeiboDate(detail.created_at || item.created_at),
-          reposts: detail.reposts_count ?? item.reposts_count ?? 0,
-          comments: detail.comments_count ?? item.comments_count ?? 0,
-          attitudes: detail.attitudes_count ?? item.attitudes_count ?? 0,
+          reposts: detail.reposts_count ?? engagement.reposts,
+          comments: detail.comments_count ?? engagement.comments,
+          attitudes: detail.attitudes_count ?? engagement.attitudes,
           raw_json: JSON.stringify(detail),
           fetched_at: new Date().toISOString(),
         });

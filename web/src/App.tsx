@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type TouchList,
+} from "react";
 import {
   Bar,
   BarChart,
@@ -31,6 +39,248 @@ function formatTime(iso: string): string {
   }
 }
 
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 5;
+const ZOOM_STEP = 0.25;
+
+function clampZoom(n: number): number {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(n * 100) / 100));
+}
+
+function Lightbox({
+  urls,
+  index,
+  onClose,
+  onIndexChange,
+}: {
+  urls: string[];
+  index: number;
+  onClose: () => void;
+  onIndexChange: (next: number) => void;
+}) {
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragging = useRef(false);
+  const lastPos = useRef({ x: 0, y: 0 });
+  const pinchStart = useRef<{ dist: number; scale: number } | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  const resetView = useCallback(() => {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  }, []);
+
+  useEffect(() => {
+    resetView();
+  }, [index, resetView]);
+
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    const prevPaddingRight = document.body.style.paddingRight;
+    const scrollbar = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (scrollbar > 0) {
+      document.body.style.paddingRight = `${scrollbar}px`;
+    }
+
+    const blockScroll = (e: Event) => {
+      // Allow wheel only inside stage (handled separately for zoom)
+      if (stageRef.current?.contains(e.target as Node)) return;
+      e.preventDefault();
+    };
+    document.addEventListener("wheel", blockScroll, { passive: false, capture: true });
+    document.addEventListener("touchmove", blockScroll, { passive: false, capture: true });
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.paddingRight = prevPaddingRight;
+      document.removeEventListener("wheel", blockScroll, true);
+      document.removeEventListener("touchmove", blockScroll, true);
+    };
+  }, []);
+
+  const zoomBy = useCallback((delta: number, center?: { x: number; y: number }) => {
+    setScale((prev) => {
+      const next = clampZoom(prev + delta);
+      if (next === 1) {
+        setOffset({ x: 0, y: 0 });
+        return next;
+      }
+      if (center && stageRef.current) {
+        const rect = stageRef.current.getBoundingClientRect();
+        const cx = center.x - rect.left - rect.width / 2;
+        const cy = center.y - rect.top - rect.height / 2;
+        const ratio = next / prev;
+        setOffset((o) => ({
+          x: cx - (cx - o.x) * ratio,
+          y: cy - (cy - o.y) * ratio,
+        }));
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (scale > 1) {
+          resetView();
+          return;
+        }
+        onClose();
+      }
+      if (e.key === "+" || e.key === "=") zoomBy(ZOOM_STEP);
+      if (e.key === "-" || e.key === "_") zoomBy(-ZOOM_STEP);
+      if (e.key === "0") resetView();
+      if (scale <= 1) {
+        if (e.key === "ArrowLeft") onIndexChange((index - 1 + urls.length) % urls.length);
+        if (e.key === "ArrowRight") onIndexChange((index + 1) % urls.length);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [index, urls.length, onClose, onIndexChange, scale, resetView, zoomBy]);
+
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
+      zoomBy(delta, { x: e.clientX, y: e.clientY });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomBy]);
+
+  if (!urls.length) return null;
+  const src = urls[index];
+
+  const onPointerDown = (e: ReactPointerEvent) => {
+    if (scale <= 1) return;
+    dragging.current = true;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  };
+
+  const onPointerMove = (e: ReactPointerEvent) => {
+    if (!dragging.current || scale <= 1) return;
+    const dx = e.clientX - lastPos.current.x;
+    const dy = e.clientY - lastPos.current.y;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+    setOffset((o) => ({ x: o.x + dx, y: o.y + dy }));
+  };
+
+  const onPointerUp = () => {
+    dragging.current = false;
+  };
+
+  const touchDist = (touches: TouchList) => {
+    const a = touches[0];
+    const b = touches[1];
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  };
+
+  return (
+    <div className="lightbox-backdrop" onClick={onClose}>
+      <button
+        type="button"
+        className="lightbox-close"
+        onClick={onClose}
+        aria-label="关闭预览"
+      >
+        ×
+      </button>
+
+      <div className="lightbox-zoom-bar" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="lightbox-zoom-btn" onClick={() => zoomBy(-ZOOM_STEP)} aria-label="缩小">
+          −
+        </button>
+        <button type="button" className="lightbox-zoom-label" onClick={resetView} title="重置缩放">
+          {Math.round(scale * 100)}%
+        </button>
+        <button type="button" className="lightbox-zoom-btn" onClick={() => zoomBy(ZOOM_STEP)} aria-label="放大">
+          +
+        </button>
+      </div>
+
+      {urls.length > 1 && scale <= 1 && (
+        <>
+          <button
+            type="button"
+            className="lightbox-nav lightbox-prev"
+            onClick={(e) => {
+              e.stopPropagation();
+              onIndexChange((index - 1 + urls.length) % urls.length);
+            }}
+            aria-label="上一张"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            className="lightbox-nav lightbox-next"
+            onClick={(e) => {
+              e.stopPropagation();
+              onIndexChange((index + 1) % urls.length);
+            }}
+            aria-label="下一张"
+          >
+            ›
+          </button>
+        </>
+      )}
+
+      <div
+        ref={stageRef}
+        className={`lightbox-stage${scale > 1 ? " is-zoomed" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          if (scale > 1) resetView();
+          else zoomBy(1, { x: e.clientX, y: e.clientY });
+        }}
+        onTouchStart={(e) => {
+          if (e.touches.length === 2) {
+            pinchStart.current = { dist: touchDist(e.touches), scale };
+          }
+        }}
+        onTouchMove={(e) => {
+          if (e.touches.length === 2 && pinchStart.current) {
+            e.preventDefault();
+            const ratio = touchDist(e.touches) / pinchStart.current.dist;
+            const next = clampZoom(pinchStart.current.scale * ratio);
+            setScale(next);
+            if (next === 1) setOffset({ x: 0, y: 0 });
+          }
+        }}
+        onTouchEnd={() => {
+          pinchStart.current = null;
+        }}
+      >
+        <img
+          className="lightbox-img"
+          src={src}
+          alt={`预览 ${index + 1}/${urls.length}`}
+          draggable={false}
+          style={{
+            transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+          }}
+        />
+      </div>
+
+      <div className="lightbox-counter" onClick={(e) => e.stopPropagation()}>
+        {index + 1} / {urls.length}
+        <span className="lightbox-hint">滚轮缩放 · 双击放大 · 拖拽移动</span>
+      </div>
+    </div>
+  );
+}
+
 function GalleryView() {
   const [region, setRegion] = useState("");
   const [gender, setGender] = useState("");
@@ -41,6 +291,7 @@ function GalleryView() {
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<PostDetail | null>(null);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const limit = 40;
 
   const load = useCallback(async (nextOffset = 0, append = false) => {
@@ -68,6 +319,26 @@ function GalleryView() {
   useEffect(() => {
     void load(0, false);
   }, [load]);
+
+  const previewUrls = useMemo(() => {
+    if (!detail) return [];
+    return detail.images
+      .map((img) => mediaUrl(img.local_path))
+      .filter((u): u is string => Boolean(u));
+  }, [detail]);
+
+  const openDetail = async (weiboId: string, openPreview = false) => {
+    const post = await api.post(weiboId);
+    setDetail(post);
+    if (openPreview) {
+      const urls = post.images
+        .map((img) => mediaUrl(img.local_path))
+        .filter((u): u is string => Boolean(u));
+      setPreviewIndex(urls.length ? 0 : null);
+    } else {
+      setPreviewIndex(null);
+    }
+  };
 
   return (
     <div className="panel">
@@ -104,23 +375,35 @@ function GalleryView() {
         {items.map((item) => {
           const cover = mediaUrl(item.cover_path);
           return (
-            <article
-              key={item.weibo_id}
-              className="card"
-              onClick={() => void api.post(item.weibo_id).then(setDetail)}
-            >
+            <article key={item.weibo_id} className="card">
               {cover ? (
-                <img className="thumb" src={cover} alt={item.region} loading="lazy" />
+                <button
+                  type="button"
+                  className="thumb-btn"
+                  title="点击预览大图"
+                  onClick={() => void openDetail(item.weibo_id, true)}
+                >
+                  <img className="thumb" src={cover} alt={item.region} loading="lazy" />
+                </button>
               ) : (
                 <div className="thumb" />
               )}
-              <div className="meta">
+              <div
+                className="meta"
+                role="button"
+                tabIndex={0}
+                onClick={() => void openDetail(item.weibo_id, false)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void openDetail(item.weibo_id, false);
+                }}
+              >
                 <div className="region">
                   #{item.region}求脱单# · {item.gender || "未知"}
                 </div>
                 <div className="sub">投稿ID：{item.submit_id}</div>
                 <div className="sub">
-                  {formatTime(item.created_at)} · {item.image_count} 图
+                  {formatTime(item.created_at)} · {item.image_count} 图 · 评 {item.comments} · 赞{" "}
+                  {item.attitudes}
                 </div>
               </div>
             </article>
@@ -143,26 +426,61 @@ function GalleryView() {
       )}
 
       {detail && (
-        <div className="modal-backdrop" onClick={() => setDetail(null)}>
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            setDetail(null);
+            setPreviewIndex(null);
+          }}
+        >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="toolbar" style={{ justifyContent: "space-between" }}>
               <strong>
                 #{detail.region}求脱单# · {detail.gender || "未知"} · 投稿ID：{detail.submit_id}
               </strong>
-              <button className="btn secondary" onClick={() => setDetail(null)}>
+              <button
+                className="btn secondary"
+                onClick={() => {
+                  setDetail(null);
+                  setPreviewIndex(null);
+                }}
+              >
                 关闭
               </button>
             </div>
-            <div className="muted">{formatTime(detail.created_at)}</div>
+            <div className="muted">
+              {formatTime(detail.created_at)} · 评论 {detail.comments} · 转发 {detail.reposts} · 点赞{" "}
+              {detail.attitudes}
+            </div>
             <p className="pre">{plainText(detail.text)}</p>
             <div className="modal-images">
-              {detail.images.map((img) => {
+              {detail.images.map((img, i) => {
                 const src = mediaUrl(img.local_path);
-                return src ? <img key={img.id} src={src} alt="" /> : null;
+                if (!src) return null;
+                return (
+                  <button
+                    key={img.id}
+                    type="button"
+                    className="modal-image-btn"
+                    title="点击查看大图"
+                    onClick={() => setPreviewIndex(i)}
+                  >
+                    <img src={src} alt="" />
+                  </button>
+                );
               })}
             </div>
           </div>
         </div>
+      )}
+
+      {previewIndex !== null && previewUrls.length > 0 && (
+        <Lightbox
+          urls={previewUrls}
+          index={previewIndex}
+          onClose={() => setPreviewIndex(null)}
+          onIndexChange={setPreviewIndex}
+        />
       )}
     </div>
   );
